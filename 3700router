@@ -89,68 +89,31 @@ class Router:
              #   self.sendTo("{}", "no route", src) # drop the packet
             
                 # check which row in routing table works:
-                #bestRoute = self.getBestRoute(dest)
+                bestRoute = self.getBestRoute(dest)
 
-                #if not bestRoute:
+                if not bestRoute:
                     self.sendTo("{}", "no route", fromNeighbor) # send it back to them, no route works
-
                 # sendTo(msg, "data", destFromBestRoute)
 
+
+    def convertToBinary(self, IPstring):
+        x = lambda n : bin(n).replace("0b", "").zfill(8) # 32 bit value
+        quads = list(int(i) for i in IPstring.split('.'))
+        return ''.join(list(map(x, quads)))
 
     # determines the best route to forward the data packet to    
     # dest is the destination of the packet-- is not necessarily a neighbor     
     def getBestRoute(self, dest):
-        destQuads = list(int(i) for i in dest.split('.'))
-        print('\n\n\nquads = ', destQuads)
+        destbinary = self.convertToBinary(dest)
 
         # go thru each msg in FT, see if network matches, 
         for msg in self.forwardingTable:
-            #network = msg['network']
-            networkBinaryStr = ''
-            networkQuads = list(int(i) for i in msg['network'].split('.'))
-            x = lambda n : bin(n).replace("0b", "")
-            networkQuadsAsBin = map(x, networkQuads)
-            networkBinaryStr.join(networkQuadsAsBin)
-            print('\n\n\n networkBinaryStr = ', networkBinaryStr)
+            networkbinary = self.convertToBinary(msg['network'])
+            netmaskbinary = self.convertToBinary(msg['netmask'])
+            bitwiseAndResult = int(networkbinary, 2) & int(netmaskbinary, 2)
 
-            #netmask = msg['network']
-            # netmaskQuads = list(int(i) for i in msg['netmask'].split('.'))
-            # netmaskQuadsAsBin = map(self.decimalToBinary, netmaskQuads)
-
-            
-            # print('\n\n\n\n\n net ' + net)
-
-            # rowQuads = list(int(i) for i in msg['network'].split('.'))
-
-            # matchesAt = {
-            #     0: [],
-            #     1: [],
-            #     2: [],
-            #     3: [],
-            # }
-
-            # # iterate thru the dest IP's quad, seeing which from FT match
-            # for quad, i in enumerate(destQuads):
-            #     if destQuads[i] == rowQuads[i]:
-            #         matchesAt[i].append(destQuads)
-            
-
-# table:
-# 172.0.0.0/8 
-# 172.128.0.0/9
-
-# 172.128.88.99
-
-        # look at forwarding table, which has entries with the shape:
-            # {
-            #     "network":    "<network prefix>",           # Example: 12.0.0.0
-            #     "netmask":    "<associated subnet netmask>",# Example: 255.0.0.0
-            #     "localpref":  "<integer>",                  # Example: 100
-            #     "selfOrigin": "<true|false>",
-            #     "ASPath":     "{<nid>, [nid], ...}",        # Examples: [1] or [3, 4] or [1, 4, 3]
-            #     "origin":     "<IGP|EGP|UNK>",                    
-            # }
-        
+            backToBin = bin(bitwiseAndResult)
+            print('\n\n\n backToBin = ', backToBin)
 
         return
 
@@ -163,10 +126,6 @@ class Router:
         for n in self.neighbors:
             if n != srcIP and (everyone or self.relations[n] == "cust"):
                 self.send(n, json.dumps({ "type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
-                # print("\n\n\n\n\nsent msg to: " + n + "\n\n\n\n\n")
-
-
-    # from: https://www.scaler.com/topics/convert-decimal-to-binary-in-python/
 
 
 if __name__ == "__main__":

@@ -1,20 +1,28 @@
 #!/usr/bin/env -S python3 -u
 
+from __future__ import annotations
 import argparse, socket, time, json, select, struct, sys, math
 
 class Router:
 
-    relations = {}
-    sockets = {}
-    ports = {}
+    relations = {} # map: ip -> relation
+    sockets = {} # map: ip -> socket objects
+    ports = {} # map: ip -> port
+
+    neighbors = [] # the ips of all our neighbors
+
+    forwardingTable = [] # our list of rows in the fowarding table. always appending.
+    allAnnouncements = [] # record of all announcements weve receieved
+
 
     def __init__(self, asn, connections):
         print("Router at AS %s starting up" % asn)
         self.asn = asn
         for relationship in connections:
             port, neighbor, relation = relationship.split("-")
+            self.neighbors.append(neighbor)
 
-            self.sockets[neighbor] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sockets[neighbor] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # sockets[neigbborsIP] = socket obj
             self.sockets[neighbor].bind(('localhost', 0))
             self.ports[neighbor] = int(port)
             self.relations[neighbor] = relation
@@ -41,7 +49,44 @@ class Router:
                 msg = k.decode('utf-8')
 
                 print("Received message '%s' from %s" % (msg, srcif))
+                self.parseMsg(json.loads(msg))
         return
+        
+    # take in the json msg object
+    def parseMsg(self, announcement):
+        type = announcement["type"]
+        src = announcement["src"]
+        dest = announcement["dst"]
+        msg = announcement["msg"]
+
+        # received update:
+        if type == 'update':
+            modifiedASPath = msg["ASPath"]
+            modifiedASPath.insert(0, self.asn)
+            publicMsg = {"network": msg["network"], "netmask": msg["netmask"], "ASPath": modifiedASPath}
+
+            self.allAnnouncements.append(announcement) # append the whole announcement to list
+            self.forwardingTable.append(msg) # append the routing information we get to our table
+
+            # check who we receieved it from
+            recievedFrom = self.relations[src] # one of cust, prov, peer
+
+            # send updates to all other neighbors
+            if recievedFrom == "cust":
+                print("\n\n\n\n\ngot update msg from a cust\n\n\n\n\n")
+                self.sendTo(publicMsg, "update", src)
+            else: # else, send only to custs
+                print("\n\n\n\n\ngot update msg from a non-cust\n\n\n\n\n")
+                self.sendTo(publicMsg, "update", src, False)
+                
+    def sendTo(self, msg: str, type: str, srcIP: str, everyone = True):
+        # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
+        for n in self.neighbors:
+            if n != srcIP and (everyone or self.relations[n] == "cust"):
+                self.send(n, json.dumps({ "type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
+                print("\n\n\n\n\nsent msg to: " + n + "\n\n\n\n\n")
+
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='route packets')

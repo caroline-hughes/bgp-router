@@ -65,27 +65,128 @@ eg --> ./router 7 7833-1.2.3.2-cust 2374-192.168.0.2-peer 1293-67.32.9.2-prov
   - IP of neighbor router on the first port is 1.2.3.2 --> the IP your router should use on this port is 1.2.3.1 (NEIGHBOR ALWAYS ENDS IN 2, URS ENDS IN 1)
   - The first neighbor belongs to a BGP customer. The second neighbor is a BGP peer. The third neighbor is a BGP provider.
 
+one UDP socket per neighbor
+must be constantly reading from all sockets
+
+
+To handle multiple sockets, use event-driven style using select() or poll() , as opposed to 1 thread for each socket
+
+
+JSON MSG FORMAT:
+{
+  "src":  "<source IP>",
+  "dst":  "<destination IP>",
+  "type": "<update|withdraw|data|no route|dump|table|handshake>",                   
+  "msg":  {...}
+}
+
+
+how to interpret src and dest depends on type...
+
+
+> type = handshake: when router starts up, need to send to all neighbors, ie
+  {
+  "src":  "1.2.3.1",
+  "dst":  "1.2.3.2",
+  "type": "handshake",                   
+  "msg":  {}
+}
+
+> type = update: route annoucements from neighbors
+  1. save the accounement in case need later
+  2. update ur table
+  3. potench send update to neighbors
+
+  {
+  "src":  "<source IP>",        # Example: 172.65.0.2
+  "dst":  "<destination IP>",   # Example: 172.65.0.1  Notice the final one, this will typically be the IP address of your router
+  "type": "update",                   
+  "msg": 
+  {
+    "network":    "<network prefix>",           # Example: 12.0.0.0
+    "netmask":    "<associated subnet netmask>",# Example: 255.0.0.0
+    "localpref":  "<integer>",                  # Example: 100
+    "selfOrigin": "<true|false>",
+    "ASPath":     "{<nid>, [nid], ...}",        # Examples: [1] or [3, 4] or [1, 4, 3]
+    "origin":     "<IGP|EGP|UNK>",                    
+  }
+}
+
+the final four items of msg help for breaking ties
+
+u need to store all the msg info in ur table, then decide whether to send an "update" msg to others, depending on the src and who ur neighbors are...
+rules:
+  Update received from a customer: send updates to all other neighbors
+  Update received from a peer or a provider: only send updates to your customers
+
+
+** When you send a copy of your route annoucnement to a neighbor, you should not include any of the “private” 
+fields (localpref, selfOrigin, or origin)... only (network, netmask, and ASPath).
+
+
+type = "withdraw" is a revocation. taking back an annoucement.
+similarly to update, mustYour router must 
+1. save a copy of the revocation in case need later
+2. remove the dead entry from the forwarding table
+3. maybe send copies of the revocation to other neighbors. 
+
+{
+  "src":  "<source IP>",        # Example: 172.65.0.2
+  "dst":  "<destination IP>",   # Example: 172.65.0.1
+  "type": "withdraw",                   
+  "msg": 
+  [
+    {"network": "<network prefix>", "netmask": "<associated subnet mask>"},   <--- LIST! of networks to be removed from table
+    {"network": "<network prefix>", "netmask": "<associated subnet mask>"},
+    ...
+  ]
+}
+
+
+type="data": the actual packets! here, you dont care about contents of msg. u just forward it along
+{
+  "src":  "<source IP>",        # Example: 134.0.88.77  <-- not you or a neighbor!
+  "dst":  "<destination IP>",   # Example: 12.4.66.13   <-- not you or a neighbor!
+  "type": "data",                   
+  "msg":  "<some data>"
+}
+
+your job is to determine:
+
+(1) which route (if any) in the forwarding table is the best route to use for the given destination IP
+  - none? send type="no route"
+  - one? send there 
+  - multiple table rows that match with with diff dest IPS? --> use longest prefix match
+     - possible your forwarding table will include multiple destination networks that all match the destination of the data packet
+        - suppose your forwarding table contains two entries: 172.0.0.0/8 and 172.128.0.0/9. These two ranges overlap. 
+            - now suppose a data message arrives with destination IP 172.128.88.99: which of the two entries should you choose? 
+                - The answer is the longest prefix match, which in this case would be 172.128.0.0/9, since it has a 9-bit netmask, 
+                versus 172.0.0.0/8 which only has an 8-bit netmask.
+  - multiple with exact same IPs? --> do tie break stuff
 
 
 
+(2) whether the data packet is being forwarded legally: depends on relationships:
+   - If source or destination is a customer, forward
+   - If the source is a peer or a provider, and destination is a peer or a provider, then drop the data message. (send type="no route")
+
+
+type="dump" is for them to check the state of our tables, not real bgp thing:
+ - When your router receives a “dump” message, 
+   it must respond with a type=“table” message that contains a copy of the current 
+   routing announcement cache in your router. 
+
+- in this table message, we send list of the rows in our table 
+    - you will need to perform aggregation on these announcements before you send your response...
 
 
 
+WHEN TO AGGREGATE?
+In practice, aggregation should be triggered after each “update” has been received, i.e to compress the table. 
+Note however that “withdraw” messages may require your router to disaggregate its table!
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-./router <asn> <port-ip.add.re.ss-[peer,prov,cust]> [port-ip.add.re.ss-[peer,prov,cust]] ...[port-ip.add.re.ss-[peer,prov,cust]]
-
+Milestone
+For the milestone, your code must pass the 1-1-simple-send.conf and 1-2-simple-send.conf tests, 
+which simply requires that it be able to connect to two peers, 
+forward route announcements, and construct a simple routing table.

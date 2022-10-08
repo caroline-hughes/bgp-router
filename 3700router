@@ -14,6 +14,10 @@ class Router:
     forwardingTable = [] # our list of rows in the fowarding table. always appending.
     allAnnouncements = [] # record of all announcements weve receieved
 
+    def decimalToBinary(n):
+    # converting decimal to binary
+    # and removing the prefix(0b)
+        return bin(n).replace("0b", "")
 
     def __init__(self, asn, connections):
         print("Router at AS %s starting up" % asn)
@@ -34,6 +38,7 @@ class Router:
         return "%d.%d.%d.%d" % (quads[0], quads[1], quads[2], quads[3])
 
     def send(self, network, message):
+        print('\n\n\n\n loPorts: ', self.ports)
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
     def run(self):
@@ -49,11 +54,11 @@ class Router:
                 msg = k.decode('utf-8')
 
                 print("Received message '%s' from %s" % (msg, srcif))
-                self.parseMsg(json.loads(msg))
+                self.parseMsg(json.loads(msg), sock)
         return
         
     # take in the json msg object
-    def parseMsg(self, announcement):
+    def parseMsg(self, announcement, fromNeighbor):
         type = announcement["type"]
         src = announcement["src"]
         dest = announcement["dst"]
@@ -73,20 +78,96 @@ class Router:
 
             # send updates to all other neighbors
             if recievedFrom == "cust":
-                print("\n\n\n\n\ngot update msg from a cust\n\n\n\n\n")
-                self.sendTo(publicMsg, "update", src)
+                # print("\n\n\n\n\ngot update msg from a cust\n\n\n\n\n")
+                self.sendToNeighbors(publicMsg, "update", src)
             else: # else, send only to custs
-                print("\n\n\n\n\ngot update msg from a non-cust\n\n\n\n\n")
-                self.sendTo(publicMsg, "update", src, False)
-                
-    def sendTo(self, msg: str, type: str, srcIP: str, everyone = True):
-        # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
+                # print("\n\n\n\n\ngot update msg from a non-cust\n\n\n\n\n")
+                self.sendToNeighbors(publicMsg, "update", src, False)
+
+        if type == 'data':
+           # if self.relations[src] != "cust" and self.relations[dest] != "cust":
+             #   self.sendTo("{}", "no route", src) # drop the packet
+            
+                # check which row in routing table works:
+                #bestRoute = self.getBestRoute(dest)
+
+                #if not bestRoute:
+                    self.sendTo("{}", "no route", fromNeighbor) # send it back to them, no route works
+
+                # sendTo(msg, "data", destFromBestRoute)
+
+
+    # determines the best route to forward the data packet to    
+    # dest is the destination of the packet-- is not necessarily a neighbor     
+    def getBestRoute(self, dest):
+        destQuads = list(int(i) for i in dest.split('.'))
+        print('\n\n\nquads = ', destQuads)
+
+        # go thru each msg in FT, see if network matches, 
+        for msg in self.forwardingTable:
+            #network = msg['network']
+            networkBinaryStr = ''
+            networkQuads = list(int(i) for i in msg['network'].split('.'))
+            x = lambda n : bin(n).replace("0b", "")
+            networkQuadsAsBin = map(x, networkQuads)
+            networkBinaryStr.join(networkQuadsAsBin)
+            print('\n\n\n networkBinaryStr = ', networkBinaryStr)
+
+            #netmask = msg['network']
+            # netmaskQuads = list(int(i) for i in msg['netmask'].split('.'))
+            # netmaskQuadsAsBin = map(self.decimalToBinary, netmaskQuads)
+
+            
+            # print('\n\n\n\n\n net ' + net)
+
+            # rowQuads = list(int(i) for i in msg['network'].split('.'))
+
+            # matchesAt = {
+            #     0: [],
+            #     1: [],
+            #     2: [],
+            #     3: [],
+            # }
+
+            # # iterate thru the dest IP's quad, seeing which from FT match
+            # for quad, i in enumerate(destQuads):
+            #     if destQuads[i] == rowQuads[i]:
+            #         matchesAt[i].append(destQuads)
+            
+
+# table:
+# 172.0.0.0/8 
+# 172.128.0.0/9
+
+# 172.128.88.99
+
+        # look at forwarding table, which has entries with the shape:
+            # {
+            #     "network":    "<network prefix>",           # Example: 12.0.0.0
+            #     "netmask":    "<associated subnet netmask>",# Example: 255.0.0.0
+            #     "localpref":  "<integer>",                  # Example: 100
+            #     "selfOrigin": "<true|false>",
+            #     "ASPath":     "{<nid>, [nid], ...}",        # Examples: [1] or [3, 4] or [1, 4, 3]
+            #     "origin":     "<IGP|EGP|UNK>",                    
+            # }
+        
+
+        return
+
+
+    def sendTo(self, msg: str, type: str, toIP: str):
+        self.send(toIP, json.dumps({ "type": type, "src": self.our_addr(toIP), "dst": toIP, "msg": msg  }))
+
+    # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
+    def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):
         for n in self.neighbors:
             if n != srcIP and (everyone or self.relations[n] == "cust"):
                 self.send(n, json.dumps({ "type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
-                print("\n\n\n\n\nsent msg to: " + n + "\n\n\n\n\n")
+                # print("\n\n\n\n\nsent msg to: " + n + "\n\n\n\n\n")
 
-    
+
+    # from: https://www.scaler.com/topics/convert-decimal-to-binary-in-python/
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='route packets')
@@ -95,3 +176,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     router = Router(args.asn, args.connections)
     router.run()
+

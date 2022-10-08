@@ -155,13 +155,22 @@ your job is to determine:
 
 (1) which route (if any) in the forwarding table is the best route to use for the given destination IP
   - none? send type="no route"
+
   - one? send there 
+
   - multiple table rows that match with with diff dest IPS? --> use longest prefix match
      - possible your forwarding table will include multiple destination networks that all match the destination of the data packet
         - suppose your forwarding table contains two entries: 172.0.0.0/8 and 172.128.0.0/9. These two ranges overlap. 
             - now suppose a data message arrives with destination IP 172.128.88.99: which of the two entries should you choose? 
                 - The answer is the longest prefix match, which in this case would be 172.128.0.0/9, since it has a 9-bit netmask, 
                 versus 172.0.0.0/8 which only has an 8-bit netmask.
+
+table:
+172.0.0.0/8  -> network and netmask
+172.128.0.0/9
+
+172.128.88.99
+
   - multiple with exact same IPs? --> do tie break stuff
 
 

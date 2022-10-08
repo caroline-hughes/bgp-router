@@ -1,0 +1,91 @@
+
+BGP Router is a hardware box with bunch of high speed jacks on it (ports). Each port has diff ip 
+
+The routers job is to 
+(1) keep its forwarding table up-to-date, based on the BGP protocol messages it gets from its neighbors, 
+(2) help keep its neighbors' forwarding tables up to date, by sending BGP protocol messages to them, and 
+(3) make a best-effort attempt to forward data packets to their correct destination.
+
+
+
+Provided is a simple implementation of a router that simply connects to its peers, sends a handshake message, and prints out every other message it receives. 
+
+
+
+/config holds the tests they’ll run on us, using ./run script
+
+COMMAND LINE SPEC
+$ ./run [config-file]
+
+
+
+./3700router is the router script we write:
+When executed, it will
+1. Open several UDP sockets, each corr to one “port” on router
+    1. Yes, multiple open sockets at once
+2. Receive msgs on these sockets (ports), each being
+    1. BGP command from a neighbor, or
+    2. A data packet u have to forward to dest
+
+"The simulator will take care of setting up the UDP sockets, running your program, and closing your program at the end of each simulation.”
+
+Instead of real packet formats, well send json 
+
+Requirements:
+1. Accept route updates from bgp neighbors
+    1. Forward them as appropriate
+2. Accept route revocation (?) msgs from bgp neighbors
+    1. Forward as appropriate
+3. Forward data packets correctly
+4. Return error msgs when packet cant be delivered
+5. **** Coalesce forwarding table entries from networks that are adjacent and on same port 
+6. **** Serialize your routing table cache so it can be checked for correctness 
+
+
+Command Line Spec for our script
+                <portNum-IPwithdotsInIt-peer|prov|cust>
+./router <asn> <port-ip.add.re.ss-[peer,prov,cust]> [port-ip.add.re.ss-[peer,prov,cust]] ...[port-ip.add.re.ss-[peer,prov,cust]]
+
+
+takes one argument: the AS number for your router
+
+then 1 or more arguments representing the “ports” that connect to its neighboring routers. 
+For each port, the respective command line argument informs your router 
+  (1) what UDP port you should use to communicate with the neighboring router, 
+  (2) what IP address of the neighboring router on this port, and 
+  (3) the type of relationship your router has with this neighboring router: peer, provider, or customer
+
+
+eg --> ./router 7 7833-1.2.3.2-cust 2374-192.168.0.2-peer 1293-67.32.9.2-prov
+  This tells us your router:
+
+  - is part of AS 7.
+  - has three ports, connected to three neighboring routers. 
+      - will need to open three UDP sockets to ports 7833, 2374, and 1293, respectively. (the sim does this tho??)
+  - IP of neighbor router on the first port is 1.2.3.2 --> the IP your router should use on this port is 1.2.3.1 (NEIGHBOR ALWAYS ENDS IN 2, URS ENDS IN 1)
+  - The first neighbor belongs to a BGP customer. The second neighbor is a BGP peer. The third neighbor is a BGP provider.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+./router <asn> <port-ip.add.re.ss-[peer,prov,cust]> [port-ip.add.re.ss-[peer,prov,cust]] ...[port-ip.add.re.ss-[peer,prov,cust]]
+

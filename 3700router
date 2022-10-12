@@ -38,8 +38,11 @@ class Router:
         return "%d.%d.%d.%d" % (quads[0], quads[1], quads[2], quads[3])
 
     def send(self, network, message):
-        print('\n\n\n\n loPorts: ', self.ports)
+        # print('\n\n\n\n loPorts: ', self.ports)
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
+
+    def sendTo(self, msg: str, type: str, toIP: str):
+        self.send(toIP, json.dumps({ "type": type, "src": self.our_addr(toIP), "dst": toIP, "msg": msg  }))
 
     def run(self):
         while True:
@@ -67,59 +70,90 @@ class Router:
         # received update:
         if type == 'update':
             modifiedASPath = msg["ASPath"]
-            modifiedASPath.insert(0, self.asn)
+            modifiedASPath.insert(0, self.asn) # prepend it to the list
             publicMsg = {"network": msg["network"], "netmask": msg["netmask"], "ASPath": modifiedASPath}
 
             self.allAnnouncements.append(announcement) # append the whole announcement to list
             self.forwardingTable.append(msg) # append the routing information we get to our table
-
+            #print('\n\ndding to FT: ', msg)
             # check who we receieved it from
             recievedFrom = self.relations[src] # one of cust, prov, peer
 
             # send updates to all other neighbors
             if recievedFrom == "cust":
-                # print("\n\n\n\n\ngot update msg from a cust\n\n\n\n\n")
                 self.sendToNeighbors(publicMsg, "update", src)
-            else: # else, send only to custs
-                # print("\n\n\n\n\ngot update msg from a non-cust\n\n\n\n\n")
+            else:
                 self.sendToNeighbors(publicMsg, "update", src, False)
 
         if type == 'data':
            # if self.relations[src] != "cust" and self.relations[dest] != "cust":
              #   self.sendTo("{}", "no route", src) # drop the packet
             
-                # check which row in routing table works:
-                bestRoute = self.getBestRoute(dest)
+            # check which row in routing table works:
+            bestRoutes = self.getBestRoute(dest)
 
-                if not bestRoute:
-                    self.sendTo("{}", "no route", fromNeighbor) # send it back to them, no route works
-                # sendTo(msg, "data", destFromBestRoute)
+            if len(bestRoutes) == 1:
+                bestRouteIP = bestRoutes[0]['network']
+                if self.isCustomerPacket(src, dest):
+                    self.sendTo(msg, "data", bestRouteIP)
+                else:
+                    self.sendTo("{}", "no route", fromNeighbor)
+            elif len(bestRoutes) > 1:
+                # TODO: break ties using rules provided, then:
+                # if self.customerPacket(src, dest):
+                    # self.sendTo(msg, "data", bestRouteIP)
+                return
+            else:
+                self.sendTo("{}", "no route", fromNeighbor)
 
+    # returns true if either the dest or src of the data packet is a cust
+    def isCustomerPacket(self, srcIP, dstIP):
+        return self.relations[srcIP] == "cust" or self.relations[dstIP] == "cust"
 
+    # returns a binary string representation of the given IP
     def convertToBinary(self, IPstring):
-        x = lambda n : bin(n).replace("0b", "").zfill(8) # 32 bit value
+        toBin = lambda n : bin(n).replace("0b", "").zfill(8) # 32 bit value
         quads = list(int(i) for i in IPstring.split('.'))
-        return ''.join(list(map(x, quads)))
+        return ''.join(list(map(toBin, quads)))
 
-    # determines the best route to forward the data packet to    
-    # dest is the destination of the packet-- is not necessarily a neighbor     
+    # returns the array containing the the best route(s)-- 0 or more-- to forward the data packet to,
+    # based on an xnor of the masking result and the destination
     def getBestRoute(self, dest):
         destbinary = self.convertToBinary(dest)
 
+        bestRoutes = [] # may end up having 0 or more
+        longestMatch = 0
+
         # go thru each msg in FT, see if network matches, 
-        for msg in self.forwardingTable:
+        for i, msg in enumerate(self.forwardingTable):
+
+            # perform masking
             networkbinary = self.convertToBinary(msg['network'])
             netmaskbinary = self.convertToBinary(msg['netmask'])
-            bitwiseAndResult = int(networkbinary, 2) & int(netmaskbinary, 2)
+            maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
 
-            backToBin = bin(bitwiseAndResult)
-            print('\n\n\n backToBin = ', backToBin)
+            # xnor netmaskbinary with destbinary
+            numMatching = self.prefixMatchLength(destbinary, maskingresult)
+            if numMatching > longestMatch:
+                longestMatch = numMatching   # new highest match
+                bestRoutes = []
+                bestRoutes.append(msg)
+            if numMatching == longestMatch:  # if matches as much but not more, append
+                bestRoutes.append(msg)       # this msg is now the only best
 
-        return
+        return bestRoutes
 
-
-    def sendTo(self, msg: str, type: str, toIP: str):
-        self.send(toIP, json.dumps({ "type": type, "src": self.our_addr(toIP), "dst": toIP, "msg": msg  }))
+    # uses xnor to determine how many characters the two strings match bits for
+    def prefixMatchLength(self, a: str, b: str):
+        if len(a) != len(b):
+            print('\n\n\nerror in prefixMatchLength, args had diff lengths!\n\n\n')
+        res = 0
+        for i in range(len(a)):
+            if a[i] != b[i]:
+                break
+            else:
+                res = res + 1
+        return res
 
     # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
     def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):

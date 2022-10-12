@@ -107,15 +107,91 @@ class Router:
                 bestRouteIP = bestRoutes[0]['peer']
                 if self.isCustomerPacket(fromNeighbor, dst):
                     self.sendHelper(msg, "data", bestRouteIP)
+                    print("BEST SINGLE ROUTE", bestRoutes[0])
                 else:
                     self.sendHelper("{}", "no route", fromNeighbor)
+
             elif len(bestRoutes) > 1:                                   # case: multiple best routes
                 # TODO: break ties using rules provided, then:
                 # if self.customerPacket(src, dst):
                     # self.sendHelper(msg, "data", bestRouteIP)
+                print('\n\n\n\n\n\n')
+                print('best Routes: ', bestRoutes)
+                bestRoute = self.tieWinner(bestRoutes)
+                bestRouteIP = bestRoute['peer']
+                if self.isCustomerPacket(fromNeighbor, dst):
+                    self.sendHelper(msg, "data", bestRouteIP)
+                else:
+                    self.sendHelper("{}", "no route", fromNeighbor)
+
+
                 return
             else:                                                       # case: no best route
                 self.sendHelper("{}", "no route", fromNeighbor)
+
+
+    #compares bestRoutes to determine which should win the tie
+    def tieWinner(self, bestRoutes):
+        largestLocal = 0;
+        wonTie = []
+        for msg in bestRoutes:
+            if msg['localpref'] > largestLocal:
+                largestLocal = msg['localpref']
+                wonTie = [msg]
+            if msg['localpref'] == largestLocal:
+                wonTie.append(msg)
+        #print("current winners for local pref", wonTie)
+        bestRoutes = wonTie
+        wonTie = []
+        if len(bestRoutes) > 1:
+            for msg in bestRoutes:
+                if msg['selfOrigin']:
+                    wonTie.append(msg)
+            #print("current winners for selfOrigin", wonTie)
+            bestRoutes = wonTie
+            wonTie = []
+            if len(bestRoutes) > 1:
+                shortestAS = len(bestRoutes[0]['ASPath'])
+                for msg in bestRoutes:
+                    if len(msg['ASPath']) < shortestAS:
+                        shortestAS = msg['ASPath']
+                        wonTie = [msg]
+                    if len(msg['ASPath']) == shortestAS:
+                        wonTie.append(msg)
+                #print("current winners for shortestASPath", wonTie)
+                bestRoutes = wonTie
+                wonTie = []
+                if len(bestRoutes) > 1:
+                    for msg in bestRoutes:
+                        if msg['origin'] == 'IGP':
+                            wonTie.append(msg)
+                    if len(wonTie) == 0:
+                        wonTie = []
+                        for msg in bestRoutes:
+                            if msg['origin'] == 'EGP':
+                                wonTie.append(msg)
+                        if len(wonTie) == 0:
+                            wonTie = bestRoutes
+                    #print("current winners for highest origin", wonTie)
+                    bestRoutes = wonTie
+                    wonTie = []
+                    if len(bestRoutes) > 1:
+                        lowestIP = self.quadsToBinary(bestRoutes[0]['network'])
+                        lowestIP = int(lowestIP, 2)
+                        for msg in bestRoutes:
+                            ip = self.quadsToBinary(msg['network'])
+                            ip = int(ip, 2)
+                            if ip < lowestIP:
+                                lowestIP = ip
+                                wonTie = [msg]
+                        bestRoutes = wonTie
+                        print('final winner', bestRoutes)
+                        print('\n\n\n\n\n')
+                        return bestRoutes[0]
+
+
+
+
 
 
     # returns the array containing the the best route(s)-- 0 or more-- to forward the data packet to,
@@ -134,12 +210,14 @@ class Router:
 
             # xnor netmaskbinary with destbinary
             numMatching = self.prefixMatchLength(destbinary, maskingresult)
+            print('current num', numMatching)
+            print('current path', msg['peer'])
             if numMatching > longestMatch:
                 longestMatch = numMatching     # new longest matching prefix
                 bestRoutes = [msg]
             elif numMatching == longestMatch:  # equally as good a match
                 bestRoutes.append(msg)  
-
+            print("longestMatch", longestMatch)
         return bestRoutes
 
     # uses xnor to determine how many characters the two strings match bits for
@@ -152,6 +230,7 @@ class Router:
                 break
             else:
                 res = res + 1
+
         return res
 
     # returns true if either the dest or src of the data packet is a cust

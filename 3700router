@@ -46,8 +46,8 @@ class Router:
     def send(self, network, message):
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
-    def sendHelper(self, msg: str, type: str, toIP: str):
-        self.send(toIP, json.dumps({ "type": type, "src": self.our_addr(toIP), "dst": toIP, "msg": msg  }))
+    def sendHelper(self, msg: str, type: str, toIP: str, destination: str):
+        self.send(toIP, json.dumps({ "type": type, "src": self.our_addr(toIP), "dst": destination, "msg": msg  }))
 
     def run(self):
         while True:
@@ -78,7 +78,7 @@ class Router:
             rows = []
             for msg in self.forwardingTable:
                 rows.append(msg)
-            self.sendHelper(rows, "table", src)
+            self.sendHelper(rows, "table", src, src)
 
         # UPDATE
         if type == 'update':
@@ -106,10 +106,10 @@ class Router:
             if len(bestRoutes) == 1:                                    # case: one best route
                 bestRouteIP = bestRoutes[0]['peer']
                 if self.isCustomerPacket(fromNeighbor, dst):
-                    self.sendHelper(msg, "data", bestRouteIP)
+                    self.sendHelper(msg, "data", bestRouteIP, dst)
                     print("BEST SINGLE ROUTE", bestRoutes[0])
                 else:
-                    self.sendHelper("{}", "no route", fromNeighbor)
+                    self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
             elif len(bestRoutes) > 1:                                   # case: multiple best routes
                 # TODO: break ties using rules provided, then:
@@ -120,14 +120,14 @@ class Router:
                 bestRoute = self.tieWinner(bestRoutes)
                 bestRouteIP = bestRoute['peer']
                 if self.isCustomerPacket(fromNeighbor, dst):
-                    self.sendHelper(msg, "data", bestRouteIP)
+                    self.sendHelper(msg, "data", bestRouteIP, dst)
                 else:
-                    self.sendHelper("{}", "no route", fromNeighbor)
+                    self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
 
                 return
             else:                                                       # case: no best route
-                self.sendHelper("{}", "no route", fromNeighbor)
+                self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
 
     #compares bestRoutes to determine which should win the tie
@@ -211,7 +211,7 @@ class Router:
             # xnor netmaskbinary with destbinary
             numMatching = self.prefixMatchLength(destbinary, maskingresult)
             print('current num', numMatching)
-            print('current path', msg['peer'])
+            print('current path', msg['network'])
             if numMatching > longestMatch:
                 longestMatch = numMatching     # new longest matching prefix
                 bestRoutes = [msg]
@@ -224,6 +224,8 @@ class Router:
     def prefixMatchLength(self, a: str, b: str):
         if len(a) != len(b):
             print('\n\n\nerror in prefixMatchLength, args had diff lengths!\n\n\n')
+        print(a)
+        print(b)
         res = 0
         for i in range(len(a)):
             if a[i] != b[i]:

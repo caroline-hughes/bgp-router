@@ -94,13 +94,32 @@ class Router:
             else:
                 self.sendToNeighbors(publicMsg, "update", src, False)
 
+        if type == 'withdraw':
+            self.allAnnouncements.append(announcement) # append the whole announcement to list
+            for revoked in msg:
+                res = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
+                                 and i['peer'] == src, self.forwardingTable))[0]
+                print('\n\n\n\n\n OUR RESULT')
+                print(res)
+                self.forwardingTable.remove(res)
+
+            recievedFrom = self.relations[src]
+            if recievedFrom == "cust":
+                self.sendToNeighbors(msg, "withdraw", src)
+            else:
+                self.sendToNeighbors(msg, "withdraw", src, False)
+
+
+
+
+
         # DATA
         if type == 'data':
             bestRoutes = self.getBestRoute(dst)
             
             if len(bestRoutes) == 1:                                    # case: one best route
                 bestRouteIP = bestRoutes[0]['peer']
-                if self.isCustomerPacket(fromNeighbor, dst):
+                if self.isCustomerPacket(fromNeighbor, bestRouteIP):
                     self.sendHelper(msg, "data", bestRouteIP, dst)
                 else:
                     self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
@@ -108,7 +127,7 @@ class Router:
             elif len(bestRoutes) > 1:                                   # case: multiple best routes
                 bestRoute = self.tieWinner(bestRoutes)
                 bestRouteIP = bestRoute['peer']
-                if self.isCustomerPacket(fromNeighbor, dst):
+                if self.isCustomerPacket(fromNeighbor, bestRouteIP):
                     self.sendHelper(msg, "data", bestRouteIP, dst)
                 else:
                     self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
@@ -230,14 +249,14 @@ class Router:
 
     # returns true if either the dest or src of the data packet is a cust
     def isCustomerPacket(self, srcIP, dstIP):
-        return (srcIP in self.relations.keys() and self.relations[srcIP] == "cust") or (dstIP in self.relations.keys() and self.relations[dstIP] == "cust")
 
+        return (srcIP in self.relations.keys() and self.relations[srcIP] == "cust") or (dstIP in self.relations.keys() and self.relations[dstIP] == "cust")
 
     # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
     def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):
         for n in self.neighbors:
             if n != srcIP and (everyone or self.relations[n] == "cust"):
-                self.send(n, json.dumps({ "type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
+                self.send(n, json.dumps({"type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
 
 
 if __name__ == "__main__":

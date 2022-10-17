@@ -14,11 +14,7 @@ class Router:
     forwardingTable = [] # our list of rows in the fowarding table. always appending.
     allAnnouncements = [] # record of all announcements weve receieved
 
-    # str of quads -> bin
-    def quadsToBinary(self, IPstring):
-        toBin = lambda n : bin(n).replace("0b", "").zfill(8) # 32 bit value
-        quads = list(int(i) for i in IPstring.split('.'))
-        return ''.join(list(map(toBin, quads)))
+
 
     # converting decimal to binary
     # and removing the prefix(0b)
@@ -101,22 +97,15 @@ class Router:
         # DATA
         if type == 'data':
             bestRoutes = self.getBestRoute(dst)
-            #print('\n\n bestRoutes: ', bestRoutes)
             
             if len(bestRoutes) == 1:                                    # case: one best route
                 bestRouteIP = bestRoutes[0]['peer']
                 if self.isCustomerPacket(fromNeighbor, dst):
                     self.sendHelper(msg, "data", bestRouteIP, dst)
-                    print("BEST SINGLE ROUTE", bestRoutes[0])
                 else:
                     self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
             elif len(bestRoutes) > 1:                                   # case: multiple best routes
-                # TODO: break ties using rules provided, then:
-                # if self.customerPacket(src, dst):
-                    # self.sendHelper(msg, "data", bestRouteIP)
-                print('\n\n\n\n\n\n')
-                print('best Routes: ', bestRoutes)
                 bestRoute = self.tieWinner(bestRoutes)
                 bestRouteIP = bestRoute['peer']
                 if self.isCustomerPacket(fromNeighbor, dst):
@@ -148,7 +137,8 @@ class Router:
                 if msg['selfOrigin']:
                     wonTie.append(msg)
             #print("current winners for selfOrigin", wonTie)
-            bestRoutes = wonTie
+            if len(wonTie) != 0:
+                bestRoutes = wonTie
             wonTie = []
             if len(bestRoutes) > 1:
                 shortestAS = len(bestRoutes[0]['ASPath'])
@@ -178,6 +168,7 @@ class Router:
                     if len(bestRoutes) > 1:
                         lowestIP = self.quadsToBinary(bestRoutes[0]['network'])
                         lowestIP = int(lowestIP, 2)
+                        wonTie = [msg]
                         for msg in bestRoutes:
                             ip = self.quadsToBinary(msg['network'])
                             ip = int(ip, 2)
@@ -185,12 +176,18 @@ class Router:
                                 lowestIP = ip
                                 wonTie = [msg]
                         bestRoutes = wonTie
-                        print('final winner', bestRoutes)
-                        print('\n\n\n\n\n')
+                        #print('final winner', bestRoutes)
+                        #print('\n\n\n\n\n')
                         return bestRoutes[0]
+        if len(bestRoutes) > 0:
+            return bestRoutes[0]
 
+        # str of quads -> bin
 
-
+    def quadsToBinary(self, IPstring):
+        toBin = lambda n: bin(n).replace("0b", "").zfill(8)  # 32 bit value
+        quads = list(int(i) for i in IPstring.split('.'))
+        return ''.join(list(map(toBin, quads)))
 
 
 
@@ -206,26 +203,22 @@ class Router:
             # perform masking
             networkbinary = self.quadsToBinary(msg['network'])
             netmaskbinary = self.quadsToBinary(msg['netmask'])
-            maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
+            maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)),"032b")
+
 
             # xnor netmaskbinary with destbinary
             numMatching = self.prefixMatchLength(destbinary, maskingresult)
-            print('current num', numMatching)
-            print('current path', msg['network'])
             if numMatching > longestMatch:
                 longestMatch = numMatching     # new longest matching prefix
                 bestRoutes = [msg]
             elif numMatching == longestMatch:  # equally as good a match
-                bestRoutes.append(msg)  
-            print("longestMatch", longestMatch)
+                bestRoutes.append(msg)
         return bestRoutes
 
     # uses xnor to determine how many characters the two strings match bits for
     def prefixMatchLength(self, a: str, b: str):
         if len(a) != len(b):
             print('\n\n\nerror in prefixMatchLength, args had diff lengths!\n\n\n')
-        print(a)
-        print(b)
         res = 0
         for i in range(len(a)):
             if a[i] != b[i]:

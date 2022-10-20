@@ -2,26 +2,32 @@
 
 from __future__ import annotations
 import argparse, socket, time, json, select, struct, sys, math
+from telnetlib import BM
 from ast import Num
 import re
 from copy import copy
 from itertools import combinations
 
+
+
 class Router:
 
-    relations = {} # map: ip -> relation
-    sockets = {} # map: ip -> socket objects
-    ports = {} # map: ip -> port
+    relations = {}
+    sockets = {}
+    ports = {}
 
     neighbors = [] # the ips of all our neighbors
 
     forwardingTable = [] # our list of rows in the fowarding table. always appending.
     allAnnouncements = [] # record of all announcements weve receieved
 
-    # converting decimal to binary
-    # and removing the prefix(0b)
     def decimalToBinary(n):
         return bin(n).replace("0b", "")
+
+    def quadsToBinary(self, IPstring):
+        toBin = lambda n: bin(n).replace("0b", "")
+        quads = list(int(i) for i in IPstring.split('.'))
+        return ''.join(list(map(toBin, quads)))
 
     def __init__(self, asn, connections):
         print("Router at AS %s starting up" % asn)
@@ -87,24 +93,25 @@ class Router:
     def checkForAggregation(self):
         print('\n\nCHECKING FOR AGGR\n\n')
         if len(self.forwardingTable) < 2:
+            print('\n\n ONLY ONE ENTRY')
             return 
- 
-        # Print the obtained permutations
+
         for i, pair in enumerate(combinations(self.forwardingTable, 2)):
             print('pair ', i, ':\n')
             print(pair, '\n')
 
             # aggregate those which are adj numerically
-            if self.numericallyAdjacent(pair[0]['network'], pair[1]['network']):
-                print('\n numerically adjacent\n\n\n')
+            if self.numericallyAdjacent2(pair[0], pair[1]):
+                print('\n\n ADJACENT!! ')
    
                 if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0]['origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
-
+                    
                     # the network for the aggregate entry is the lower network IP
                     if int(self.quadsToBinary(pair[0]['network']), 2) < int(self.quadsToBinary(pair[1]['network']), 2):
                         minNetwork = pair[0]
                     else:
                         minNetwork = pair[1]
+
 
                     # the netmask for the aggregate has one less 1
                     netmaskInBin = self.quadsToBinary(pair[1]['netmask'])
@@ -131,59 +138,29 @@ class Router:
 
                     self.forwardingTable = list(filter(lambda entry: (entry['network'] != pair[0]["network"]) and (entry['network'] != pair[1]["network"]), self.forwardingTable))
                     self.forwardingTable.append(aggregatedMsg)
+                    self.checkForAggregation()
                     # print('NEW FT:', self.forwardingTable, '\n\n')
             else:
-                print("Cannot aggregate any entries\n")
+                print("\nCannot aggregate\n\n")
 
 
-    # takes in an entry in FT, return masking res
-    def performMasking(self, msg: str):
-        networkbinary = self.quadsToBinary(msg['network'])
-        netmaskbinary = self.quadsToBinary(msg['netmask'])
-        maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)),"032b")
+    # takes in a msg['network'] and msg['netmask'], returns the maskingresult in binary
+    def performMasking(self, network: str, netmask: str):
+        print('\nperforming masking')
+        networkbinary = self.quadsToBinary(network)
+        print('\nnetworkbinary = ', networkbinary)
+        netmaskbinary = self.quadsToBinary(netmask)
+        print('\nnetmaskbinary = ', netmaskbinary)
+        maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
+        print('\nmasking res = ', maskingresult)
         return maskingresult
-    
 
-    # turn each quad into 8-bit binary str
-    # iterate through the quads
-        # if the same, keep going
-        # if theyre different, check if their decimal values are exactly one different
-            # if so, can aggregate
-    def numericallyAdjacent(self, aIP: str, bIP: str):
-        aQuads = self.quadsToBinary(aIP)
-        bQuads = self.quadsToBinary(bIP)
+    # checks if message networks are adjacent by comparing lengths after masking
+    def numericallyAdjacent2(self, aMsg: str, bMsg: str):
+        maskingResA = self.performMasking(aMsg['network'], aMsg['netmask'])
+        maskingResB= self.performMasking(bMsg['network'], bMsg['netmask'])
 
-        byteLen = 8 # chunk length
-        aQuadsAsBin = [aQuads[i:i+byteLen] for i in range(0, len(aQuads), byteLen)]
-        aQuadsAsInts = list(map(lambda quad: int(quad, 2), aQuadsAsBin))
-
-        bQuadsAsBin = [bQuads[i:i+byteLen] for i in range(0, len(bQuads), byteLen)]
-        bQuadsAsInts = list(map(lambda quad: int(quad, 2), bQuadsAsBin))
-
-        for i, a in enumerate(aQuadsAsInts):
-            b = bQuadsAsInts[i]
-            if a != b:
-                if i == 0: # if first quadrants are different, exit
-                    return False
-                if abs(a - b) == 1:
-                    return True
-        
-        return False
-
-    # check if two entries are adjacent numerically
-    def allSameExceptLast(self, a: str, b: str):
-        if len(a) != len(b):
-            print('\n\n\nerror in allSameExceptLast, args had diff lengths!\n\n\n')
-        numSame = 0
-        for i in range(len(a)):
-            if a[i] == b[i]:
-                numSame += 1
-
-        if numSame == (len(a) - 1): # == 31
-            return True
-        else:
-            return False
-    
+        return len(maskingResA) == len(maskingResB)
     
     # take in the json msg object
     # note to self: if type != data, then fromNeighbor = src. else, the src may not be a neighbor
@@ -323,59 +300,42 @@ class Router:
         if len(bestRoutes) > 0:
             return bestRoutes[0]
 
-
-    # str of quads -> bin
-    def quadsToBinary(self, IPstring):
-        toBin = lambda n: bin(n).replace("0b", "").zfill(8)  # 32 bit value
-        quads = list(int(i) for i in IPstring.split('.'))
-        return ''.join(list(map(toBin, quads)))
-
-
-
-    # returns the array containing the the best route(s)-- 0 or more-- to forward the data packet to,
-    # based on an xnor of the masking result and the destination
+    # returns the array containing the best route(s) to forward the data packet to
     def getBestRoute(self, dest):
         destbinary = self.quadsToBinary(dest)
 
-        bestRoutes = [] # may end up having 0 or more
+        # there will be zero or more best routes
+        bestRoutes = [] 
         longestMatch = 0
 
         for msg in self.forwardingTable:
-            # perform masking
-            networkbinary = self.quadsToBinary(msg['network'])
-            netmaskbinary = self.quadsToBinary(msg['netmask'])
-            maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)),"032b")
+            maskingresult = self.performMasking(msg['network'], msg['netmask'])
 
-
-            # xnor netmaskbinary with destbinary
             numMatching = self.prefixMatchLength(destbinary, maskingresult)
             if numMatching > longestMatch:
-                longestMatch = numMatching     # new longest matching prefix
+                longestMatch = numMatching    # new best match
                 bestRoutes = [msg]
-            elif numMatching == longestMatch:  # equally as good a match
+            elif numMatching == longestMatch: # equally as good a match
                 bestRoutes.append(msg)
         return bestRoutes
 
-    # uses xnor to determine how many characters the two strings match bits for
-    def prefixMatchLength(self, a: str, b: str):
-        if len(a) != len(b):
-            print('\n\n\nerror in prefixMatchLength, args had diff lengths!\n\n\n')
+    # use xnor to see how many matching bits between the given binary strings
+    def prefixMatchLength(self, destbinary: str, maskingresult: str):
         res = 0
-        for i in range(len(a)):
-            if a[i] != b[i]:
+        maxIndex = min(len(maskingresult), len(destbinary))
+        for i in range(maxIndex):
+            if destbinary[i] != maskingresult[i]:
                 break
             else:
                 res += 1
 
         return res
 
-
-    # returns true if either the dest or src of the data packet is a cust
+    # check if either the destination or src of the packet is a customer
     def isCustomerPacket(self, srcIP, dstIP):
-
         return (srcIP in self.relations.keys() and self.relations[srcIP] == "cust") or (dstIP in self.relations.keys() and self.relations[dstIP] == "cust")
 
-    # forward msgToSend to every relation except for the srcIP (where it came from), and non-customers, if specified by bool
+    # forward message to every relation except for the source ip (where it came from) and non-customers
     def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):
         for n in self.neighbors:
             if n != srcIP and (everyone or self.relations[n] == "cust"):

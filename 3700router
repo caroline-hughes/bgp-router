@@ -68,34 +68,43 @@ class Router:
                 numOnes+=1
 
         return numOnes
-
     def buildNewNewmask(self, numOnes: Num):
         res = ''
         for n in range(numOnes):
             res += '1'
-
         numZeros = 32 - numOnes
-
         for n in range(numZeros):
             res += '0'
-
         return res
 
+    def maskingValue(self, mask: str):
+        ones = 0
+        for bit in mask:
+            if bit == "1":
+                ones+=1
+        return ones
 
     def checkForAggregation(self):
-        print('\n\nCHECKING FOR AGGR\n\n')
+        print('\n\nCHECKING FOR AGGR')
         if len(self.forwardingTable) < 2:
-            print('\n\n ONLY ONE ENTRY')
+            # print('\n\n ONLY ONE ENTRY')
             return 
 
         for i, pair in enumerate(combinations(self.forwardingTable, 2)):
             print('pair ', i, ':\n')
             print(pair, '\n')
 
-            # aggregate those which are adj numerically
-            if self.numericallyAdjacent2(pair[0], pair[1]):
-                print('\n\n ADJACENT!! ')
-   
+            maskVal = -1
+            # aggregated entries must share the same netmask
+            if pair[0]['netmask'] == pair[1]['netmask']:
+                maskVal = self.maskingValue(self.quadsToBinary(pair[0]['netmask']))
+                print('MASK VAL\n')
+                print(maskVal)
+    
+            # check for numeric adjacency, same next hop, and matching attributes
+            if maskVal != -1 and self.numericallyAdjacent(pair[0], pair[1], maskVal):
+                # print('\n\n ADJACENT')
+
                 if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0]['origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
                     
                     # the network for the aggregate entry is the lower network IP
@@ -104,23 +113,12 @@ class Router:
                     else:
                         minNetwork = pair[1]
 
-
-                    # the netmask for the aggregate has one less 1
-                    netmaskInBin = self.quadsToBinary(pair[1]['netmask'])
-                    numOnes = self.countOnes(netmaskInBin)
-
-                    # new netmask is numOnes - 1, concatenated with 0s to fill out the rest of the 32 bits
-                    newNetmask = self.buildNewNewmask(numOnes - 1)
-
-                    # 32 bit str --> 4 8 bit strs
-                    byteLen = 8
-                    quadsAsBin = [newNetmask[i:i+byteLen] for i in range(0, len(newNetmask), byteLen)]
-                    quadsAsInts = map(lambda quad: str(int(quad, 2)), quadsAsBin)
-                    res = '.'.join(quadsAsInts)
+                    oldMask = self.quadsToBinary(pair[0]['netmask'])
+                    newMask = oldMask[:maskVal-1] + "0" + oldMask[maskVal:] # new netmask has one less 1 bit
 
                     aggregatedMsg = {
                         "network": minNetwork["network"], 
-                        "netmask": res, 
+                        "netmask": self.bitsToQuads(newMask), 
                         "localpref": pair[0]['localpref'], 
                         "origin": pair[0]['origin'], 
                         "selfOrigin": pair[0]['selfOrigin'], 
@@ -130,33 +128,31 @@ class Router:
 
                     self.forwardingTable = list(filter(lambda entry: (entry['network'] != pair[0]["network"]) and (entry['network'] != pair[1]["network"]), self.forwardingTable))
                     self.forwardingTable.append(aggregatedMsg)
-                    # self.checkForAggregation()
-                    # print('NEW FT:', self.forwardingTable, '\n\n')
             else:
                 print("\nCannot aggregate\n\n")
 
+    def bitsToQuads(self, mask: str):
+        byteLen = 8
+        quadsAsBin = [mask[i:i+byteLen] for i in range(0, len(mask), byteLen)]
+        quadsAsInts = map(lambda quad: str(int(quad, 2)), quadsAsBin)
+        return '.'.join(quadsAsInts)
 
-    # takes in a msg['network'] and msg['netmask'], returns the maskingresult in binary
-    def performMasking(self, network: str, netmask: str):
-        print('\nperforming masking')
+    # takes in a msg['network'] and msg['netmask'], returns the masking result in binary
+    def performMasking(self, network: str, maskVal: int):
         networkbinary = self.quadsToBinary(network)
-        print('\nnetworkbinary = ', networkbinary)
-        netmaskbinary = self.quadsToBinary(netmask)
-        print('\nnetmaskbinary = ', netmaskbinary)
+        # netmaskbinary = self.quadsToBinary(netmask)
 
-        # count num of ones in mask
-        maskVal = self.countOnes(netmaskbinary)
-        maskingresult = networkbinary[:maskVal]
-
-        # maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
-        print('\nmasking res = ', maskingresult)
-        return maskingresult
+        # # keep only the first n bits of the network, where n is the num of 1s in netmask
+        # maskVal = self.countOnes(netmaskbinary)
+        print('MASK VAL\n')
+        print(maskVal)
+        return networkbinary[:maskVal]
 
 
     # checks if message networks are adjacent by comparing lengths after masking
-    def numericallyAdjacent2(self, aMsg: str, bMsg: str):
-        maskingResA = self.performMasking(aMsg['network'], aMsg['netmask'])
-        maskingResB= self.performMasking(bMsg['network'], bMsg['netmask'])
+    def numericallyAdjacent(self, aMsg: str, bMsg: str, maskVal: int):
+        maskingResA = self.performMasking(aMsg['network'], maskVal)
+        maskingResB= self.performMasking(bMsg['network'], maskVal)
 
         return len(maskingResA) == len(maskingResB)
     
@@ -329,7 +325,9 @@ class Router:
         longestMatch = 0
 
         for msg in self.forwardingTable:
-            maskingresult = self.performMasking(msg['network'], msg['netmask'])
+            maskVal = self.maskingValue(self.quadsToBinary(msg['netmask']))
+            maskingresult = self.performMasking(msg['network'], maskVal)
+            
 
             numMatching = self.prefixMatchLength(destbinary, maskingresult)
             if numMatching > longestMatch:

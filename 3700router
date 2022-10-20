@@ -12,6 +12,7 @@ class Router:
     neighbors = [] # the ips of all our neighbors
     forwardingTable = [] # our list of rows in the fowarding table. always appending.
     allAnnouncements = [] # record of all announcements weve receieved
+    aggregatedNetworks = []
 
     def decimalToBinary(n):
         return bin(n).replace("0b", "")
@@ -79,7 +80,9 @@ class Router:
                     # print('\n\n ADJACENT')
 
                     if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0]['origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
-                        
+
+                        self.aggregatedNetworks.append(pair[0])
+                        self.aggregatedNetworks.append(pair[1])
                         # the network for the aggregate entry is the lower network IP
                         if int(self.quadsToBinary(pair[0]['network']), 2) < int(self.quadsToBinary(pair[1]['network']), 2):
                             minNetwork = pair[0]
@@ -105,6 +108,35 @@ class Router:
             
             # print("\n CANNOT AGGREGATE \n")
 
+    def checkAggCount(self, wasAggregated):
+        aggregatedCount = 0;
+        if len(self.forwardingTable) < 2:
+            return 0
+
+        for i, pair in enumerate(combinations(self.forwardingTable, 2)):
+            # print('pair ', i, ':\n')
+            # print(pair, '\n')
+
+            # aggregated entries must share the same netmask
+            if pair[0]['netmask'] == pair[1]['netmask']:
+                maskVal = self.maskingValue(self.quadsToBinary(pair[0]['netmask']))
+
+                # check for numeric adjacency, same next hop, and matching attributes
+                if self.numericallyAdjacent(pair[0], pair[1], maskVal):
+                    # print('\n\n ADJACENT')
+
+                    if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0][
+                        'origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
+
+                        if pair[0] == wasAggregated or pair[1] == wasAggregated:
+                            print('pair0', pair[0])
+                            print('pair1', pair[1])
+                            print('wasAggregated', wasAggregated)
+                            aggregatedCount = aggregatedCount + 1
+                        break
+        return aggregatedCount
+
+
     def maskingValue(self, mask: str):
         ones = 0
         for bit in mask:
@@ -128,6 +160,27 @@ class Router:
         maskingResA = self.performMasking(aMsg['network'], maskVal)
         maskingResB= self.performMasking(bMsg['network'], maskVal)
         return len(maskingResA) == len(maskingResB)
+
+    def rebuildTable(self, wasAggregated):
+        self.forwardingTable = []
+        for announcement in self.allAnnouncements:
+            if announcement['type'] == 'update':
+                msg = announcement["msg"]
+                src = announcement["src"]
+                msg['peer'] = src
+                self.forwardingTable.append(msg)
+                count = self.checkAggCount(wasAggregated)
+                if count == 0:
+                    self.checkForAggregation()
+            if announcement['type'] == 'withdraw':
+                for revoked in announcement['msg']:
+                    print("\n\n\n\nSHOULD BE WITHDRAWN", revoked)
+                    entry = list(filter(lambda i: i['network'] == revoked['network'] and
+                                                  i['netmask'] == revoked['netmask'], self.forwardingTable))
+                    if entry:
+                        self.forwardingTable.remove(entry[0])
+                        print("\n\n\n\nWAS WITHDRAWN", revoked['network'])
+
     
     # take in the json msg object
     # note to self: if type != data, then fromNeighbor = src. else, the src may not be a neighbor
@@ -166,11 +219,20 @@ class Router:
         if type == 'withdraw':
             self.allAnnouncements.append(announcement)
             for revoked in msg:
-                entry = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
+
+                
+                wasAggregated = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
+                                 and i['peer'] == src, self.aggregatedNetworks))
+                if wasAggregated:
+                    print("\n\n\n\nREVOKED WAS AGGREGATED", wasAggregated[0])
+                    self.rebuildTable(wasAggregated[0])
+
+                else:
+                    entry = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
                                  and i['peer'] == src, self.forwardingTable))[0]
                 
-                print('\n REMOVING ENTRY:', entry)
-                self.forwardingTable.remove(entry)
+                    print('\n REMOVING ENTRY:', entry)
+                    self.forwardingTable.remove(entry)
 
                 # TODO: perform deaggregation
                 # The simplest way to handle this is to simply throw away the entire forwarding table and 

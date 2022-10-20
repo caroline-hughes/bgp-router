@@ -1,14 +1,7 @@
 #!/usr/bin/env -S python3 -u
-
-from __future__ import annotations
-import argparse, socket, time, json, select, struct, sys, math
-from telnetlib import BM
+import argparse, socket, json, select
 from ast import Num
-import re
-from copy import copy
 from itertools import combinations
-
-
 
 class Router:
 
@@ -17,7 +10,6 @@ class Router:
     ports = {}
 
     neighbors = [] # the ips of all our neighbors
-
     forwardingTable = [] # our list of rows in the fowarding table. always appending.
     allAnnouncements = [] # record of all announcements weve receieved
 
@@ -25,7 +17,7 @@ class Router:
         return bin(n).replace("0b", "")
 
     def quadsToBinary(self, IPstring):
-        toBin = lambda n: bin(n).replace("0b", "")
+        toBin = lambda n: bin(n).replace("0b", "").zfill(8)
         quads = list(int(i) for i in IPstring.split('.'))
         return ''.join(list(map(toBin, quads)))
 
@@ -89,7 +81,7 @@ class Router:
 
         return res
 
-        
+
     def checkForAggregation(self):
         print('\n\nCHECKING FOR AGGR\n\n')
         if len(self.forwardingTable) < 2:
@@ -138,7 +130,7 @@ class Router:
 
                     self.forwardingTable = list(filter(lambda entry: (entry['network'] != pair[0]["network"]) and (entry['network'] != pair[1]["network"]), self.forwardingTable))
                     self.forwardingTable.append(aggregatedMsg)
-                    self.checkForAggregation()
+                    # self.checkForAggregation()
                     # print('NEW FT:', self.forwardingTable, '\n\n')
             else:
                 print("\nCannot aggregate\n\n")
@@ -151,9 +143,15 @@ class Router:
         print('\nnetworkbinary = ', networkbinary)
         netmaskbinary = self.quadsToBinary(netmask)
         print('\nnetmaskbinary = ', netmaskbinary)
-        maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
+
+        # count num of ones in mask
+        maskVal = self.countOnes(netmaskbinary)
+        maskingresult = networkbinary[:maskVal]
+
+        # maskingresult = bin(int(networkbinary, 2) & int(netmaskbinary, 2)).replace("0b", "")
         print('\nmasking res = ', maskingresult)
         return maskingresult
+
 
     # checks if message networks are adjacent by comparing lengths after masking
     def numericallyAdjacent2(self, aMsg: str, bMsg: str):
@@ -237,6 +235,28 @@ class Router:
                 self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
 
+    # use xnor to see how many matching bits between the given binary strings
+    def prefixMatchLength(self, destbinary: str, maskingresult: str):
+        res = 0
+        maxIndex = min(len(maskingresult), len(destbinary))
+        for i in range(maxIndex):
+            if destbinary[i] != maskingresult[i]:
+                break
+            else:
+                res += 1
+        return res
+
+    # check if either the destination or src of the packet is a customer
+    def isCustomerPacket(self, srcIP, dstIP):
+        return (srcIP in self.relations.keys() and self.relations[srcIP] == "cust") or (dstIP in self.relations.keys() and self.relations[dstIP] == "cust")
+
+    # forward message to every relation except for the source ip (where it came from) and non-customers
+    def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):
+        for n in self.neighbors:
+            if n != srcIP and (everyone or self.relations[n] == "cust"):
+                self.send(n, json.dumps({"type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
+
+    
     #compares bestRoutes to determine which should win the tie
     def tieWinner(self, bestRoutes):
         largestLocal = 0
@@ -318,28 +338,6 @@ class Router:
             elif numMatching == longestMatch: # equally as good a match
                 bestRoutes.append(msg)
         return bestRoutes
-
-    # use xnor to see how many matching bits between the given binary strings
-    def prefixMatchLength(self, destbinary: str, maskingresult: str):
-        res = 0
-        maxIndex = min(len(maskingresult), len(destbinary))
-        for i in range(maxIndex):
-            if destbinary[i] != maskingresult[i]:
-                break
-            else:
-                res += 1
-
-        return res
-
-    # check if either the destination or src of the packet is a customer
-    def isCustomerPacket(self, srcIP, dstIP):
-        return (srcIP in self.relations.keys() and self.relations[srcIP] == "cust") or (dstIP in self.relations.keys() and self.relations[dstIP] == "cust")
-
-    # forward message to every relation except for the source ip (where it came from) and non-customers
-    def sendToNeighbors(self, msg: str, type: str, srcIP: str, everyone = True):
-        for n in self.neighbors:
-            if n != srcIP and (everyone or self.relations[n] == "cust"):
-                self.send(n, json.dumps({"type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
 
 
 if __name__ == "__main__":

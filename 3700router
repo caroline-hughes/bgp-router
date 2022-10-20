@@ -4,14 +4,13 @@ from ast import Num
 from itertools import combinations
 
 class Router:
-
     relations = {}
     sockets = {}
     ports = {}
 
-    neighbors = [] # the ips of all our neighbors
-    forwardingTable = [] # our list of rows in the fowarding table. always appending.
-    allAnnouncements = [] # record of all announcements weve receieved
+    neighbors = [] 
+    forwardingTable = []
+    allAnnouncements = []
     aggregatedNetworks = []
 
     def decimalToBinary(n):
@@ -60,16 +59,12 @@ class Router:
 
                 print("Received message '%s' from %s" % (msg, srcif))
                 self.parseMsg(json.loads(msg), sock)
-        return
 
     def checkForAggregation(self):
-        print('\n\nCHECKING FOR AGGR')
         if len(self.forwardingTable) < 2:
             return 
 
-        for i, pair in enumerate(combinations(self.forwardingTable, 2)):
-            # print('pair ', i, ':\n')
-            # print(pair, '\n')
+        for pair in combinations(self.forwardingTable, 2):
 
             # aggregated entries must share the same netmask
             if pair[0]['netmask'] == pair[1]['netmask']:
@@ -77,20 +72,20 @@ class Router:
     
                 # check for numeric adjacency, same next hop, and matching attributes
                 if self.numericallyAdjacent(pair[0], pair[1], maskVal):
-                    # print('\n\n ADJACENT')
-
                     if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0]['origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
 
                         self.aggregatedNetworks.append(pair[0])
                         self.aggregatedNetworks.append(pair[1])
+
                         # the network for the aggregate entry is the lower network IP
                         if int(self.quadsToBinary(pair[0]['network']), 2) < int(self.quadsToBinary(pair[1]['network']), 2):
                             minNetwork = pair[0]
                         else:
                             minNetwork = pair[1]
 
+                        # the new netmask has one less 1
                         oldMask = self.quadsToBinary(pair[0]['netmask'])
-                        newMask = oldMask[:maskVal-1] + "0" + oldMask[maskVal:] # new netmask has one less 1 bit
+                        newMask = oldMask[:maskVal-1] + "0" + oldMask[maskVal:] 
 
                         aggregatedMsg = {
                             "network": minNetwork["network"], 
@@ -105,17 +100,13 @@ class Router:
                         self.forwardingTable = list(filter(lambda entry: (entry['network'] != pair[0]["network"]) and (entry['network'] != pair[1]["network"]), self.forwardingTable))
                         self.forwardingTable.append(aggregatedMsg)
                         break
-            
-            # print("\n CANNOT AGGREGATE \n")
 
     def checkAggCount(self, wasAggregated):
-        aggregatedCount = 0;
+        aggregatedCount = 0
         if len(self.forwardingTable) < 2:
             return 0
 
-        for i, pair in enumerate(combinations(self.forwardingTable, 2)):
-            # print('pair ', i, ':\n')
-            # print(pair, '\n')
+        for pair in combinations(self.forwardingTable, 2):
 
             # aggregated entries must share the same netmask
             if pair[0]['netmask'] == pair[1]['netmask']:
@@ -123,7 +114,6 @@ class Router:
 
                 # check for numeric adjacency, same next hop, and matching attributes
                 if self.numericallyAdjacent(pair[0], pair[1], maskVal):
-                    # print('\n\n ADJACENT')
 
                     if pair[0]['peer'] == pair[1]['peer'] and pair[0]['localpref'] == pair[1]['localpref'] and pair[0][
                         'origin'] == pair[1]['origin'] and pair[0]['selfOrigin'] == pair[1]['selfOrigin']:
@@ -136,7 +126,7 @@ class Router:
                         break
         return aggregatedCount
 
-
+    # get the int representation of the netmask
     def maskingValue(self, mask: str):
         ones = 0
         for bit in mask:
@@ -144,6 +134,7 @@ class Router:
                 ones+=1
         return ones
 
+    # turn the four chunk network ip or netmask into a single binary value
     def bitsToQuads(self, mask: str):
         byteLen = 8
         quadsAsBin = [mask[i:i+byteLen] for i in range(0, len(mask), byteLen)]
@@ -161,6 +152,7 @@ class Router:
         maskingResB= self.performMasking(bMsg['network'], maskVal)
         return len(maskingResA) == len(maskingResB)
 
+    # rebuild the forwarding table
     def rebuildTable(self, wasAggregated):
         self.forwardingTable = []
         for announcement in self.allAnnouncements:
@@ -174,16 +166,12 @@ class Router:
                     self.checkForAggregation()
             if announcement['type'] == 'withdraw':
                 for revoked in announcement['msg']:
-                    print("\n\n\n\nSHOULD BE WITHDRAWN", revoked)
                     entry = list(filter(lambda i: i['network'] == revoked['network'] and
                                                   i['netmask'] == revoked['netmask'], self.forwardingTable))
                     if entry:
                         self.forwardingTable.remove(entry[0])
-                        print("\n\n\n\nWAS WITHDRAWN", revoked['network'])
 
-    
-    # take in the json msg object
-    # note to self: if type != data, then fromNeighbor = src. else, the src may not be a neighbor
+    # delegate to functionality specified by message type
     def parseMsg(self, announcement, fromNeighbor):
         type = announcement["type"]
         src = announcement["src"]
@@ -209,68 +197,49 @@ class Router:
             modifiedASPath.insert(0, self.asn)        
             publicMsg = {"network": msg["network"], "netmask": msg["netmask"], "ASPath": modifiedASPath}
 
-            recievedFrom = self.relations[src]
             # forward updates to neighbors
-            if recievedFrom == "cust":
+            if self.relations[src] == "cust":
                 self.sendToNeighbors(publicMsg, "update", src)
             else:
                 self.sendToNeighbors(publicMsg, "update", src, False)
 
+        # WITHDRAW
         if type == 'withdraw':
             self.allAnnouncements.append(announcement)
             for revoked in msg:
-
-                
                 wasAggregated = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
                                  and i['peer'] == src, self.aggregatedNetworks))
                 if wasAggregated:
-                    print("\n\n\n\nREVOKED WAS AGGREGATED", wasAggregated[0])
                     self.rebuildTable(wasAggregated[0])
-
                 else:
                     entry = list(filter(lambda i: i['network'] == revoked['network'] and i['netmask'] == revoked['netmask']
                                  and i['peer'] == src, self.forwardingTable))[0]
-                
-                    print('\n REMOVING ENTRY:', entry)
                     self.forwardingTable.remove(entry)
 
-                # TODO: perform deaggregation
-                # The simplest way to handle this is to simply throw away the entire forwarding table and 
-                # rebuild it using the saved “update” and “withdraw” messages, although there are certainly 
-                # more performant ways of dealing with disaggregation.
-
-            recievedFrom = self.relations[src]
             # forward updates to neighbors
-            if recievedFrom == "cust":
+            if self.relations[src] == "cust":
                 self.sendToNeighbors(msg, "withdraw", src)
             else:
                 self.sendToNeighbors(msg, "withdraw", src, False)
 
-
         # DATA
         if type == 'data':
             bestRoutes = self.getBestRoute(dst)
-            
-            if len(bestRoutes) == 1:                                    # case: single best route
-                bestRouteIP = bestRoutes[0]['peer']
-                if self.isCustomerPacket(fromNeighbor, bestRouteIP):
-                    self.sendHelper(msg, "data", bestRouteIP, dst)
-                else:
-                    self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
-
-            elif len(bestRoutes) > 1:                                   # case: multiple best routes
-                bestRoute = self.tieWinner(bestRoutes)
-                bestRouteIP = bestRoute['peer']
-                if self.isCustomerPacket(fromNeighbor, bestRouteIP):
-                    self.sendHelper(msg, "data", bestRouteIP, dst)
-                else:
-                    self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
-
-
-                return
-            else:                                                       # case: no best route
+            if len(bestRoutes) < 1:     # case: no best route
                 self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
+            else:
+                if len(bestRoutes) == 1: # case: single best route
+                    bestRouteIP = bestRoutes[0]['peer']
+                else:                    # case: multiple best routes
+                    bestRouteIP = self.tieWinner(bestRoutes)['peer']
+                self.bestRouteSend(fromNeighbor, bestRouteIP, msg, dst)
+                
 
+    def bestRouteSend(self, fromNeighbor, bestRouteIP, msg, dst):
+        if self.isCustomerPacket(fromNeighbor, bestRouteIP):
+            self.sendHelper(msg, "data", bestRouteIP, dst)
+        else:
+            self.sendHelper("{}", "no route", fromNeighbor, fromNeighbor)
 
     # use xnor to see how many matching bits between the given binary strings
     def prefixMatchLength(self, destbinary: str, maskingresult: str):
@@ -293,6 +262,27 @@ class Router:
             if n != srcIP and (everyone or self.relations[n] == "cust"):
                 self.send(n, json.dumps({"type": type, "src": self.our_addr(n), "dst": n, "msg": msg  }))
 
+    # returns the array containing the best route(s) to forward the data packet to
+    def getBestRoute(self, dest):
+        destbinary = self.quadsToBinary(dest)
+
+        # there will be zero or more best routes
+        bestRoutes = [] 
+        longestMatch = 0
+
+        for msg in self.forwardingTable:
+            networkbinary = self.quadsToBinary(msg['network'])
+            netmaskbinary = self.quadsToBinary(msg['netmask'])
+            
+            maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)), "032b")
+            
+            numMatching = self.prefixMatchLength(destbinary, maskingresult)
+            if numMatching > longestMatch:
+                longestMatch = numMatching    # new best match
+                bestRoutes = [msg]
+            elif numMatching == longestMatch: # equally as good a match
+                bestRoutes.append(msg)
+        return bestRoutes
     
     # breaks ties between routes with equally matching prefixes to determine best route
     def tieWinner(self, bestRoutes):
@@ -304,14 +294,12 @@ class Router:
                 wonTie = [msg]
             if msg['localpref'] == largestLocal:
                 wonTie.append(msg)
-        #print("current winners for local pref", wonTie)
         bestRoutes = wonTie
         wonTie = []
         if len(bestRoutes) > 1:
             for msg in bestRoutes:
                 if msg['selfOrigin']:
                     wonTie.append(msg)
-            #print("current winners for selfOrigin", wonTie)
             if len(wonTie) != 0:
                 bestRoutes = wonTie
             wonTie = []
@@ -323,7 +311,6 @@ class Router:
                         wonTie = [msg]
                     if len(msg['ASPath']) == shortestAS:
                         wonTie.append(msg)
-                #print("current winners for shortestASPath", wonTie)
                 bestRoutes = wonTie
                 wonTie = []
                 if len(bestRoutes) > 1:
@@ -337,7 +324,6 @@ class Router:
                                 wonTie.append(msg)
                         if len(wonTie) == 0:
                             wonTie = bestRoutes
-                    #print("current winners for highest origin", wonTie)
                     bestRoutes = wonTie
                     wonTie = []
                     if len(bestRoutes) > 1:
@@ -351,35 +337,9 @@ class Router:
                                 lowestIP = ip
                                 wonTie = [msg]
                         bestRoutes = wonTie
-                        #print('final winner', bestRoutes)
-                        #print('\n\n\n\n\n')
                         return bestRoutes[0]
         if len(bestRoutes) > 0:
             return bestRoutes[0]
-
-    # returns the array containing the best route(s) to forward the data packet to
-    def getBestRoute(self, dest):
-        destbinary = self.quadsToBinary(dest)
-
-        # there will be zero or more best routes
-        bestRoutes = [] 
-        longestMatch = 0
-
-        for msg in self.forwardingTable:
-            # maskVal = self.maskingValue(self.quadsToBinary(msg['netmask']))
-            # maskingresult = self.performMasking(msg['network'], maskVal)
-            networkbinary = self.quadsToBinary(msg['network'])
-            netmaskbinary = self.quadsToBinary(msg['netmask'])
-            maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)), "032b")
-            
-
-            numMatching = self.prefixMatchLength(destbinary, maskingresult)
-            if numMatching > longestMatch:
-                longestMatch = numMatching    # new best match
-                bestRoutes = [msg]
-            elif numMatching == longestMatch: # equally as good a match
-                bestRoutes.append(msg)
-        return bestRoutes
 
 
 if __name__ == "__main__":

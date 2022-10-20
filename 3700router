@@ -325,8 +325,11 @@ class Router:
         longestMatch = 0
 
         for msg in self.forwardingTable:
-            maskVal = self.maskingValue(self.quadsToBinary(msg['netmask']))
-            maskingresult = self.performMasking(msg['network'], maskVal)
+            # maskVal = self.maskingValue(self.quadsToBinary(msg['netmask']))
+            # maskingresult = self.performMasking(msg['network'], maskVal)
+            networkbinary = self.quadsToBinary(msg['network'])
+            netmaskbinary = self.quadsToBinary(msg['netmask'])
+            maskingresult = format((int(networkbinary, 2) & int(netmaskbinary, 2)), "032b")
             
 
             numMatching = self.prefixMatchLength(destbinary, maskingresult)

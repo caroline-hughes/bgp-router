@@ -2,8 +2,8 @@ BGP Router that manages multiple sockets in a simulated network
 
 Partners: Elena Kosowski and Caroline Hughes
 
-High level approach:\
-&emsp;&emsp;&emsp;&emsp;We followed the suggested approach outlined in the project description. 
+High level approach:
+We followed the suggested approach outlined in the project description. 
 We spent some time on day 0 in office hours getting a better grasp on masking. 
 We spent some time figuring out how to read / interpret what is printed by the simulation on the command line. 
 Next we focused on getting first two config tests passing. It took us a while understand how to find the 
@@ -15,7 +15,7 @@ aggregation.
 
 
 
-Challenges:\
+Challenges:
 The largest obstacles for us were:
 - figuring out how netmasks are used
 - understanding how to identify numeric adjacendy, and to do it in the simplest/most efficient way

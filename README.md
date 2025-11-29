@@ -1,34 +1,123 @@
-BGP Router that manages multiple sockets in a simulated network
+# BGP Router (Python)
 
-Partners: Elena Kosowski and Caroline Hughes
+This project implements a simplified Border Gateway Protocol (BGP) router for a simulated network environment. The router manages multiple neighbor connections, exchanges routing announcements, performs longest-prefix matching, and forwards packets using BGP-style policy constraints.
 
-High level approach:
-We followed the suggested approach outlined in the project description. 
-We spent some time on day 0 in office hours getting a better grasp on masking. 
-We spent some time figuring out how to read / interpret what is printed by the simulation on the command line. 
-Next we focused on getting first two config tests passing. It took us a while understand how to find the 
-longest prefix match and tie-breaking. By the due date of the Milestone we were able to get "update", "data", 
-and 'dump" messages handled correctly. During the first day of working on the final submission, 
-we were able to get tests 1-5 passing. Figuring out how to handle "withdraw" didn't take very long. We had to spend
-alot of time figuring out how to do aggregation and disaggregation, though. We went to office hours to get help with
-aggregation. 
+## Overview
 
+The router communicates with multiple neighbors over UDP sockets using a custom JSON-based control protocol. It processes BGP-like messages including updates, withdrawals, routing table dumps, and data packets.
 
+Key capabilities include:
 
-Challenges:
-The largest obstacles for us were:
-- figuring out how netmasks are used
-- understanding how to identify numeric adjacendy, and to do it in the simplest/most efficient way
-- getting comfortable with conversions between IP address formatted quads of ints to binary and back
+-   Managing multiple sockets through `select`
+-   Processing UPDATE and WITHDRAW messages
+-   Maintaining a forwarding table with BGP attributes
+-   Longest-prefix-match route selection
+-   Full BGP tie-breaking sequence
+-   Optional route aggregation and deaggregation
+-   Customer/provider/peer routing policy enforcement
+-   Forwarding data packets according to best available routes
 
-Features of our implementation:
-- we've abstracted common functionality out for reuse in various areas. 
-   - there are helper functions which are generalized for use in multiple areas 
-- for getting for numerical adjacency, we use a simple strategy of comparing the lengths of the masking results, which is constant runtime
-- for disaggregation, we kept track of which networks were aggregated. If one of those networks was being withdrawn, we
-threw out our forwarding table and rebuilt it using our list of saved announcement messages. 
+## Message Types
 
-Testing:
-- we used the command line to run config tests as we implemented more and more functionality.
-- print statements on the command line aided in our ability to see where bugs were occurring.
-- when we got stuck, we read the config file itself to understand what behavior is expected, and where our logic was incorrect.
+The router supports the following message types:
+
+-   **handshake** – connection initialization
+-   **update** – new route advertisement
+-   **withdraw** – withdrawal of a previously advertised route
+-   **dump** – request for the router’s full forwarding table
+-   **data** – data packet requiring forwarding to a destination IP
+
+All messages use the format:
+
+{
+"type": "<message-type>",
+"src": "<source-IP>",
+"dst": "<destination-IP>",
+"msg": { ... }
+}
+
+sql
+Copy code
+
+## Forwarding Table and Route Selection
+
+Routes are stored with:
+
+-   network prefix
+-   netmask
+-   AS path
+-   origin
+-   local preference
+-   next-hop peer
+-   flags for self-originated routes
+
+When forwarding data packets, the router:
+
+1. Computes binary prefix matches between the destination and each route
+2. Selects all routes tied for the longest prefix match
+3. Applies BGP tie-breaking rules:
+
+    - highest local preference
+    - prefer self-originated routes
+    - shortest AS path length
+    - origin type preference
+    - lowest network IP
+
+This returns the single best route for packet forwarding.
+
+## Route Aggregation
+
+The router merges two routes into a less-specific prefix when:
+
+-   both networks share the same netmask
+-   networks are numerically adjacent
+-   both routes share the same next hop and attributes
+-   aggregation is permitted by policy
+
+Aggregated entries are recorded so they can be deaggregated correctly during withdrawals. If a withdrawn route affects an aggregated prefix, the router rebuilds the entire forwarding table from its history of announcements.
+
+## Customer/Provider/Peer Policy
+
+Each neighbor is labeled as a:
+
+-   customer
+-   provider
+-   peer
+
+Routing decisions and propagation rules follow simplified economic constraints (valley-free routing):
+
+-   Announcements from providers and peers are forwarded only to customers
+-   Data packets are forwarded only if the next hop does not violate customer-provider hierarchy
+
+## Running the Router
+
+python3 router.py <asn> <connections...>
+
+csharp
+Copy code
+
+Connections are specified as:
+
+port-neighborIP-relation
+
+makefile
+Copy code
+
+Example:
+
+python3 router.py 65001
+10000-10.0.0.2-cust
+10001-10.0.0.3-peer
+
+pgsql
+Copy code
+
+Each connection spawns a dedicated UDP socket, and the router begins exchanging handshake messages and participating in the routing simulation.
+
+## Implementation Notes
+
+-   Uses `select.select` to manage multiple UDP sockets concurrently
+-   Routes are stored as Python dictionaries for convenience
+-   IP addresses and netmasks are manipulated in both dotted-quad and binary forms
+-   Aggregation requires maintaining auxiliary structures to track which prefixes have been merged
+-   The router rebuilds state when deaggregation is needed to maintain correctness

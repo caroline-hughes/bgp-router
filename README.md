@@ -1,6 +1,6 @@
-# BGP Router (Python)
+# BGP Router
 
-This project implements a simplified Border Gateway Protocol (BGP) router for a simulated network environment. The router manages multiple neighbor connections, exchanges routing announcements, performs longest-prefix matching, and forwards packets using BGP-style policy constraints.
+This project implements a simplified Border Gateway Protocol (BGP) router for a simulated network environment, in python. The router manages multiple neighbor connections, exchanges routing announcements, performs longest-prefix matching, and forwards packets using BGP-style policy constraints.
 
 ## Overview
 
@@ -35,9 +35,6 @@ All messages use the format:
 "dst": "<destination-IP>",
 "msg": { ... }
 }
-
-sql
-Copy code
 
 ## Forwarding Table and Route Selection
 
@@ -93,24 +90,15 @@ Routing decisions and propagation rules follow simplified economic constraints (
 
 python3 router.py <asn> <connections...>
 
-csharp
-Copy code
-
 Connections are specified as:
 
 port-neighborIP-relation
-
-makefile
-Copy code
 
 Example:
 
 python3 router.py 65001
 10000-10.0.0.2-cust
 10001-10.0.0.3-peer
-
-pgsql
-Copy code
 
 Each connection spawns a dedicated UDP socket, and the router begins exchanging handshake messages and participating in the routing simulation.
 
